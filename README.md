@@ -154,4 +154,4 @@ See the repository for license details.
 
 ## Author
 
-Built by [midudev](https://midu.dev).
+Built by [midudev](https://midu.dev) and [Contributors](https://github.com/midudev/subvid.app/graphs/contributors).
