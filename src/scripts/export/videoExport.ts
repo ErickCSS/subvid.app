@@ -1,9 +1,18 @@
+import {
+  cutAt,
+  cutDuration,
+  keptParts,
+  mapTimeThroughCuts,
+  type TimeRange,
+} from "@/scripts/cuts.ts"
 import { drawFrame, drawSubtitlesAt } from "@/scripts/export/subtitleRenderer.ts"
 
 type VideoExportOptions = {
   ui: any
   tt: (path: string, vars?: Record<string, unknown>) => string
   currentSegments: () => any[]
+  /** Parts of the source removed in the transcript editor. */
+  cutRanges: () => TimeRange[]
   selectedVideoFile: () => File | null
   activeLang: () => string
   baseFileName: () => string
@@ -70,6 +79,7 @@ export function createVideoExporter(options: VideoExportOptions) {
     ui,
     tt,
     currentSegments,
+    cutRanges,
     selectedVideoFile,
     activeLang,
     baseFileName,
@@ -234,7 +244,7 @@ export function createVideoExporter(options: VideoExportOptions) {
   ): Promise<WebCodecsExportResult> {
     let mediabunny: any
     try {
-      mediabunny = await import("mediabunny")
+      mediabunny = await import("@/scripts/media/mediabunny.ts")
     } catch (e) {
       console.warn("[export] mediabunny failed to load, falling back", e)
       return {
@@ -254,7 +264,9 @@ export function createVideoExporter(options: VideoExportOptions) {
       Mp4OutputFormat,
       WebMOutputFormat,
       BufferTarget,
+      VideoSample,
     } = mediabunny
+    const cuts = cutRanges()
 
     modal.openExportModal()
     modal.setExportStep("prepare", "active")
@@ -328,6 +340,7 @@ export function createVideoExporter(options: VideoExportOptions) {
           latencyMode: "quality",
           keyFrameInterval: settings.quality === "optimized" ? 4 : 2,
           process: (sample: any) => {
+            if (cuts.length && cutAt(cuts, sample.timestamp)) return null
             if (!ctx) {
               canvas = new OffscreenCanvas(
                 sample.displayWidth,
@@ -343,9 +356,17 @@ export function createVideoExporter(options: VideoExportOptions) {
               canvas.height,
               segments,
             )
-            return canvas
+            if (!cuts.length) return canvas
+            // Close the gaps left by the cuts.
+            return new VideoSample(canvas, {
+              timestamp: mapTimeThroughCuts(cuts, sample.timestamp),
+              duration: sample.duration,
+            })
           },
         },
+        audio: cuts.length
+          ? { process: (sample: any) => audioThroughCuts(sample, cuts) }
+          : undefined,
       })
     } catch (e) {
       console.warn("[export] WebCodecs init failed, falling back", e)
@@ -430,12 +451,31 @@ export function createVideoExporter(options: VideoExportOptions) {
     return { handled: true }
   }
 
+  function audioThroughCuts(sample: any, cuts: TimeRange[]) {
+    const start = sample.timestamp
+    const parts = keptParts(cuts, start, start + sample.duration)
+    const kept = parts.flatMap((part) => {
+      const from = Math.max(0, Math.round((part.start - start) * sample.sampleRate))
+      const to = Math.min(
+        sample.numberOfFrames,
+        Math.round((part.end - start) * sample.sampleRate),
+      )
+      if (to <= from) return []
+      const piece =
+        from === 0 && to === sample.numberOfFrames ? sample : sample.trim(from, to)
+      piece.setTimestamp(part.outputStart)
+      return [piece]
+    })
+    return kept.length ? kept : null
+  }
+
   async function exportWithRecorder(
     segments: any[],
     settings: ExportSettings,
     fallbackReason = "",
   ) {
     const video = ui.video
+    const cuts = cutRanges()
 
     modal.openExportModal()
     if (fallbackReason) {
@@ -514,13 +554,16 @@ export function createVideoExporter(options: VideoExportOptions) {
 
     const previousVolume = video.volume
     const wasMuted = video.muted
+    // Compatibility mode records in real time: it must play at normal speed.
+    const previousRate = video.playbackRate
+    video.playbackRate = 1
     video.muted = true
     video.volume = 0
 
     modal.setExportStage(tt("exportStages.preparingVideo"), "busy")
     video.pause()
     try {
-      video.currentTime = 0
+      video.currentTime = cutAt(cuts, 0)?.end ?? 0
     } catch {}
     await new Promise((r) => setTimeout(r, 150))
 
@@ -546,10 +589,21 @@ export function createVideoExporter(options: VideoExportOptions) {
     const onEnded = () => stopRecording()
 
     const tick = () => {
-      if (ctx) drawFrame(ctx, video, w, h, segments)
       const dur = video.duration
+      // Compatibility mode records in real time, so cuts are skipped by seeking.
+      const cut = cutAt(cuts, video.currentTime + 0.02)
+      if (cut) {
+        if (dur && cut.end >= dur - 0.05) {
+          stopRecording()
+          return
+        }
+        video.currentTime = cut.end
+      }
+      if (ctx) drawFrame(ctx, video, w, h, segments)
       if (dur && isFinite(dur)) {
-        modal.setExportProgress(Math.min(94, (video.currentTime / dur) * 94))
+        const keptDur = Math.max(0.001, dur - cutDuration(cuts))
+        const done = mapTimeThroughCuts(cuts, video.currentTime) / keptDur
+        modal.setExportProgress(Math.min(94, done * 94))
         if (video.currentTime >= dur - 0.05) {
           stopRecording()
           return
@@ -571,6 +625,7 @@ export function createVideoExporter(options: VideoExportOptions) {
       if (recorder.state !== "inactive") recorder.stop()
       video.muted = wasMuted
       video.volume = previousVolume
+      video.playbackRate = previousRate
       modal.failExport(tt("exportErrors.playbackBlocked"))
       return
     }
@@ -579,6 +634,7 @@ export function createVideoExporter(options: VideoExportOptions) {
 
     video.muted = wasMuted
     video.volume = previousVolume
+    video.playbackRate = previousRate
 
     modal.setExportStep("encode", "done")
     modal.setExportStep("done", "done")

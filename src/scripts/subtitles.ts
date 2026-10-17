@@ -11,6 +11,8 @@ export type SubtitleWord = {
   start: number
   end: number
   text: string
+  /** Cut from the video in the transcript editor: kept for restoring, never shown. */
+  cut?: boolean
 }
 
 type NormalizeSegmentsOptions = {
@@ -204,7 +206,7 @@ function isWordLevelChunks(chunks: any[]) {
   return singleWordChunks / textChunks.length > 0.82
 }
 
-function wordsText(words: SubtitleWord[]) {
+export function wordsText(words: SubtitleWord[]) {
   return words.reduce((text, word) => appendWordText(text, word.text), "").trim()
 }
 
@@ -302,8 +304,9 @@ export function estimatedWordsForSegment(segment: SubtitleSegment): SubtitleWord
   if (!text) return []
 
   const textWords = tokenizeSubtitleText(text)
-  const storedWords =
-    Array.isArray(segment.words) && segment.words.length ? segment.words : []
+  const storedWords = Array.isArray(segment.words)
+    ? segment.words.filter((word) => !word.cut)
+    : []
   if (
     storedWords.length &&
     wordsText(storedWords).replace(/\s+/g, " ") === text.replace(/\s+/g, " ")
@@ -369,6 +372,7 @@ export function normalizeSegments(
 
 export function buildSrt(segments: SubtitleSegment[]): string {
   return segments
+    .filter((s) => s.text.trim())
     .map(
       (s, i) =>
         `${i + 1}\n${formatSrtTime(s.start)} --> ${formatSrtTime(s.end)}\n${s.text}`,

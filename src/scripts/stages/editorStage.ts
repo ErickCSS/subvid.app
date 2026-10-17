@@ -1,13 +1,13 @@
+import { segmentsThroughCuts, type TimeRange } from "@/scripts/cuts.ts"
 import { baseFileName } from "@/scripts/file.ts"
 import type { Stage } from "@/scripts/stageManager.ts"
-import { buildSrt } from "@/scripts/subtitles.ts"
+import { buildSrt, type SubtitleSegment } from "@/scripts/subtitles.ts"
 import type { ui as appUi } from "@/scripts/ui.ts"
-
-type Segment = { start: number; end: number; text: string }
 
 type EditorStageOptions = {
   ui: typeof appUi
-  currentSegments: () => Segment[]
+  currentSegments: () => SubtitleSegment[]
+  cutRanges: () => TimeRange[]
   activeLang: () => string
   selectedVideoFile: () => File | null
   isExporting: () => boolean
@@ -28,6 +28,7 @@ function isTextInputTarget(target: EventTarget | null) {
 export function createEditorStageController({
   ui,
   currentSegments,
+  cutRanges,
   activeLang,
   selectedVideoFile,
   isExporting,
@@ -53,7 +54,8 @@ export function createEditorStageController({
     const segments = currentSegments()
     if (!segments.length) return
 
-    const blob = new Blob([buildSrt(segments)], {
+    // The SRT goes with the exported (cut) video.
+    const blob = new Blob([buildSrt(segmentsThroughCuts(segments, cutRanges()))], {
       type: "text/plain;charset=utf-8",
     })
     const url = URL.createObjectURL(blob)
@@ -69,7 +71,11 @@ export function createEditorStageController({
       const key = event.key.toLowerCase()
 
       if ((event.metaKey || event.ctrlKey) && (key === "z" || key === "y")) {
-        if (isTextInputTarget(event.target)) return
+        // The transcript re-renders as it's edited, so the browser's own undo
+        // can't follow it: it shares the editor history instead.
+        const inTranscript =
+          event.target instanceof HTMLElement && !!event.target.closest(".transcript")
+        if (isTextInputTarget(event.target) && !inTranscript) return
 
         const wantsRedo = key === "y" || (key === "z" && event.shiftKey)
         event.preventDefault()
