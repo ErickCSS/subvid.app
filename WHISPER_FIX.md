@@ -1,5 +1,15 @@
 # Fix: Whisper Transcription Fallback WebGPU → WASM/CPU
 
+> **Actualización (octubre 2026).** Ya no se fuerza fp32 en CPU. `src/scripts/transcriber.worker.ts` elige el modelo según el dispositivo:
+>
+> - **WebGPU con `shader-f16`**: encoder fp16 + decoder q4f16 (110 MB). Unas 2 veces más rápido que en CPU.
+> - **CPU (WASM)**: q8 (77 MB en lugar de 291 MB) y el build normal de ONNX Runtime (14 MB en lugar de los 27 MB del `asyncify`).
+> - Si WebGPU falla al cargar o a mitad de la transcripción, se recarga el modelo en WASM y se reintenta.
+>
+> El error `TransposeDQWeightsForMatMulNBits` de Firefox viene de los pesos `MatMulNBits` de los modelos **q4** en el backend WASM. Los modelos **q8** usan `MatMulInteger`, así que no les afecta. Por eso en CPU se usa q8 y nunca q4.
+>
+> Mediciones con whisper-base (Chromium y WebKit en Apple Silicon): voz en inglés de 45 s, WER 1,5 % con fp32, 1,5 % con q8 y 0,7 % con fp16/q4f16. Voz en español, WER 17,5 % con fp32 y 15,3 % con q8. Transcribir 3 min de audio: 47 s con fp32 en WASM, 51 s con q8 en WASM y 23 s con fp16/q4f16 en WebGPU.
+
 ## Problema
 
 Se reportaron múltiples errores al generar subtítulos en diferentes navegadores:
