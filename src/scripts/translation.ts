@@ -139,7 +139,10 @@ function hasNoisyTranslationArtifacts(text: string) {
   )
 }
 
-function marianGenerationOptions(texts: string[]) {
+// Bounded greedy decoding for both local models: caps the output length to the
+// input and blocks repeated trigrams, which otherwise make quantized (CPU)
+// models loop ("The The The…") until they hit the 200-token default.
+function generationOptions(texts: string[]) {
   const maxChars = texts.reduce(
     (max, text) => Math.max(max, String(text || "").length),
     0,
@@ -286,10 +289,13 @@ export function createTranslationService(options: TranslationServiceOptions) {
     await ensureTransformersTranslator("nllb", TRANSLATION_MODEL)
   }
 
+  // MarianMT also runs on the CPU: measured against NLLB (both 8-bit on WASM),
+  // it downloads 113 MB instead of 895 MB, translates ~8x faster and scores
+  // better on both en→es and es→en.
   async function ensureMarianTranslator(sourceLang: string, targetLang: string) {
     const model = marianModelForPair(sourceLang, targetLang)
-    if (!model || !hasWebGPU) return false
-    await ensureTransformersTranslator("marian", model, true)
+    if (!model) return false
+    await ensureTransformersTranslator("marian", model)
     return true
   }
 
@@ -330,6 +336,7 @@ export function createTranslationService(options: TranslationServiceOptions) {
       texts,
       src: (LANGS as any)[sourceLang].nllb,
       tgt: (LANGS as any)[targetLang].nllb,
+      generation: generationOptions(texts),
     })
     const output = normalizeNllbTranslations(translated, texts)
     logLocalTranslationBatch({
@@ -352,7 +359,7 @@ export function createTranslationService(options: TranslationServiceOptions) {
     batchNumber?: number,
     totalBatches?: number,
   ) {
-    const generation = marianGenerationOptions(texts)
+    const generation = generationOptions(texts)
     const translated: any = await options.transformersClient.call("translate", {
       backend: "marian",
       generation,
@@ -375,7 +382,6 @@ export function createTranslationService(options: TranslationServiceOptions) {
 
   async function translateWithBatches(
     texts: string[],
-    sourceLang: string,
     targetLang: string,
     batchSize: number,
     translateBatch: (
@@ -411,7 +417,7 @@ export function createTranslationService(options: TranslationServiceOptions) {
     targetLang: string,
   ) {
     await ensureNllbTranslator()
-    return translateWithBatches(texts, sourceLang, targetLang, NLLB_BATCH_SIZE, (
+    return translateWithBatches(texts, targetLang, NLLB_BATCH_SIZE, (
       batch,
       batchNumber,
       totalBatches,
@@ -434,7 +440,7 @@ export function createTranslationService(options: TranslationServiceOptions) {
     if (!(await ensureMarianTranslator(sourceLang, targetLang))) {
       throw new Error("MarianMT is unavailable for this language pair")
     }
-    return translateWithBatches(texts, sourceLang, targetLang, MARIAN_BATCH_SIZE, (
+    return translateWithBatches(texts, targetLang, MARIAN_BATCH_SIZE, (
       batch,
       batchNumber,
       totalBatches,
@@ -455,7 +461,7 @@ export function createTranslationService(options: TranslationServiceOptions) {
     targetLang: string,
     preferMarian = true,
   ) {
-    if (preferMarian && marianModelForPair(sourceLang, targetLang) && hasWebGPU) {
+    if (preferMarian && marianModelForPair(sourceLang, targetLang)) {
       try {
         return await translateWithMarian(texts, sourceLang, targetLang)
       } catch (err) {

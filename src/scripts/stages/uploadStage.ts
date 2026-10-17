@@ -181,15 +181,12 @@ export function createUploadStageController({
     setLangAddStatus("");
     populateAddLang();
     renderSegments();
-    ui.addSegBtn.disabled = true;
     enableExports(false);
     resetHistory();
-    ui.generationTime.hidden = true;
-    ui.generationTime.textContent = "";
 
     ui.outputLang.value = "same";
     ui.inputLang.value = "";
-    ui.wordAnimation.checked = false;
+    ui.wordAnimation.checked = true;
 
     const metaText = `${file.name} · ${prettifyBytes(file.size)}`;
     ui.meta.textContent = metaText;
@@ -216,8 +213,6 @@ export function createUploadStageController({
     resetTranscriptionCache();
     resetEditorState();
     ui.langTabs.innerHTML = "";
-    ui.generationTime.hidden = true;
-    ui.generationTime.textContent = "";
     setLangAddStatus("");
     populateAddLang();
     ui.caption.textContent = "";
