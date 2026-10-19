@@ -432,6 +432,7 @@ export function createTimelineController(options: TimelineOptions) {
   }
 
   function beginScrub(event: PointerEvent) {
+    blurActiveEditable()
     scrubbing = true
     scrubResumePlayback = !ui.video.paused
     if (scrubResumePlayback) ui.video.pause()
