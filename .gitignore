@@ -31,3 +31,6 @@ pnpm-debug.log*
 # AI Agents & VibeCoding artifacts
 .agents/
 .claude/
+# browser test artifacts
+test-results/
+playwright-report/

@@ -81,6 +81,30 @@ pnpm dev
 
 No environment variables or external services are required for local development.
 
+On Linux, the first install can spend several minutes in the
+`onnxruntime-node` postinstall while downloading and extracting GPU runtime
+binaries from NuGet. Use `pnpm install --frozen-lockfile --reporter=append-only`
+to see which step is running; avoid restarting it just because the download
+does not print a progress bar.
+
+### Editing text and cutting video
+
+Backspace, Delete, and cutting text to the clipboard only edit subtitles; they
+do not remove audio or video. To trim media, select words in the original
+transcription and choose **Cut from video**. Partial selections cut the whole
+touched word. Click the struck-through words to restore them, or use Undo/Redo.
+Translation tracks only support text editing.
+
+### Editor regression tests
+
+```sh
+pnpm exec playwright install chromium firefox
+pnpm test
+```
+
+The tests run the real transcript controller against fixed subtitle data in
+Chromium and Firefox, without downloading transcription models.
+
 ## Scripts
 
 | Command | Description |
